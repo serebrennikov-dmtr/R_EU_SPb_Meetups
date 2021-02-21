@@ -1,0 +1,484 @@
+---
+title: Основы работы с пространственными данными в R
+author: "Серебренников Д."
+date: '19 февраля 2021 г.'
+output:
+  html_document:
+    code_folding: hide
+    df_print: paged
+    highlight: pygments
+    smooth_scroll: no
+    theme: united
+    toc: yes
+    toc_depth: 3
+    toc_float: yes
+    toc_position: right
+  pdf_document:
+    toc: yes
+    toc_depth: '3'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# План митапа
+
+- Типы пространственных данных;
+
+- Особенности геоданных;
+
+- R и пространственный анализ;
+
+- Практика - находим геоданные разных форматов и учимся с ними работать;
+
+- Что можно почитать и посмотреть по теме.
+
+
+&nbsp;
+
+
+
+```{r, echo=FALSE, warning=FALSE, results='hide',message=FALSE}
+library(sf)
+library(geojsonsf)
+library(geojsonio)
+library(readr)
+library(data.table)
+```
+
+# 1. Типы пространственных данных
+
+&nbsp;
+
+**а. Векторные данные**
+
+- Геометрии состоят из точек. Конвенционально x = широта, y = долгота. Кроме этого могут использоваться z = высота, M = мера изменчивости точки;
+
+- Виды геометрий:
+
+<div align="center">
+```{r, echo=FALSE, fig.align="center", out.width = '90%'}
+knitr::include_graphics("/cloud/project/geom_types.png")
+```
+</div>
+
++++ GEOMETRYCOLLECTION +++
+
+
+- Форматы записи данных:
+  
+  *Well-Known Text (WKT)* - Запись точек вектором из геометрий
+  
+  *Well-Known Binary (WKB)* - Запись координат в бинарных значениях. Используется в базах данных (т.к. увеличивает скорость работы с данными), но нечитаем и непонятен для человека.
+  
+  
+Посмотрим в первом приближении:  
+
+```{r, warning=FALSE, results='show',message=FALSE, class.source='fold-show'}
+library(sf)
+
+library(rnaturalearth)
+world <- ne_countries(returnclass = "sf")
+world <- world[1:5,c(4, ncol(world))]
+
+# Для иллюстрации
+world_1 <- world
+world_1$geometry <- as.character(world_1$geometry)
+as.data.table(world_1)
+```
+
+&nbsp;
+
+
+**b. Растровые данные**
+
+- Матрица значений пикселей пространственной области. В растрах хронят космические снимки и базы различных геологических данных. Также как и вектор - предназначены для определённого круга задач;
+
+- Основной формат: .tif
+
+- Основные библиотеки для обработки в R: raster и stars
+
+
+*Сравним:*
+
+```{r, echo=FALSE, fig.align="center", out.width = '90%'}
+knitr::include_graphics("/cloud/project/vactor-raster.png")
+```
+
+
+**На этом и последующих занятиях мы будем говорить только о векторных данных.**
+
+&nbsp;
+
+Главное, нужно помнить, что векторные пространственные данные - это (чаще всего) просто точки на плоскости! Создадим собственные пространственные данные: 
+
+```{r, warning=FALSE, fig.align="center", results='show',message=FALSE, class.source='fold-show'}
+p1 = st_point(c(7,52)) # Рисуем точку 1
+p2 = st_point(c(-30,20)) # Рисуем точку 2
+sp_obj = st_sfc(p1, p2, crs = 4326) # Преобразуем в пространственные данные
+plot(sp_obj)
+
+# Вы восхитительны!
+```
+
+…
+
+&nbsp;
+
+
+
+# 2. Особенности геоданных
+
+Вернёмся к векторным геометриям:
+
+```{r, warning=FALSE, results='show',message=FALSE, class.source='fold-hide'}
+world
+```
+
+&nbsp;
+
+**Coordinate Reference Systems** (CRS) / Пространственная привязка и её **проекции**
+
+Что это такое?
+
+
+Для иллюстрации обратимся к [прекрасной работе Тасс](https://merkator.tass.ru/).
+
+&nbsp;
+
+Картинки чтобы окончательно закрепить идею проекции.
+
+&nbsp;
+
+
+<div align="center">
+```{r, echo=FALSE, fig.align="center", out.width = '90%'}
+knitr::include_graphics("/cloud/project//mercator_apple.jpg")
+```
+</div>
+
+&nbsp;
+
+
+<div align="center">
+```{r, echo=FALSE, fig.align="center", out.width = '90%'}
+knitr::include_graphics("/cloud/project/proj_man.jpg")
+```
+</div>
+
+&nbsp;
+
+
+
+
+Как посмотреть проекцию в CRS?
+
+```{r, warning=FALSE, results='show',message=FALSE, class.source='fold-hide'}
+st_crs(world)
+```
+
+
+&nbsp;
+
+
+<div align="center">
+```{r, echo=FALSE, fig.align="center", out.width = '80%'}
+knitr::include_graphics("/cloud/project//slozhno.jpg")
+```
+</div>
+
+&nbsp;
+
+На самом деле всё не так сложно.
+
+Пространственный объект можно перевести в другую CRS сразу и быстро, задав через st_transform() нужную проекцию одним из четырёх форматов (просто гуглите то, что нужно для вашего пространства):
+
+- Код EPSG (например, "4326")
+- Формула PROJ4  (например, "+proj=longlat +datum=WGS84 +no_defs")
+- Строчка WKT 
+- Просто переносом проекции с другого пространственного объекта ( df1 <- st_transform(df1, st_crs(df2)) )
+
+
+Например:
+
+
+```{r, warning=FALSE, results='show',message=FALSE, class.source='fold-show'}
+Afg = world[1,]
+plot(Afg)
+
+
+```
+
+
+```{r, warning=FALSE, results='show',message=FALSE, class.source='fold-show'}
+# Change crs
+Afg <- st_transform(Afg, 2264)
+plot(Afg)
+```
+
+
+```{r, warning=FALSE, results='show',message=FALSE, class.source='fold-show'}
+# Change crs
+Afg <- st_transform(Afg, "+proj=longlat +datum=WGS84 +no_defs")
+plot(Afg)
+```
+
+В геоданных есть ещё множество подводных камней, но этот - ключевой и его необходимо запомнить.
+
+&nbsp;
+
+
+# 3. R и пространственный анализ
+
+
+**Почему R?**
+
+&nbsp;
+
+```{r, echo=FALSE, fig.align="center", out.width = '90%'}
+knitr::include_graphics("/cloud/project/30_days_chellenge.png")
+```
+
+&nbsp;
+
+
+*Библиотеки для работы с геоданными в R*
+
+(несть им числа, но основные)
+
+
+- [sf](https://r-spatial.github.io/sf/) - state-of-the-art пространственного анализа в R. 
+
+Немного истории:
+
+```{r, echo=FALSE, fig.align="center", out.width = '70%'}
+knitr::include_graphics("/cloud/project/sf_architecture.png")
+```
+
+
+&nbsp;
+
+
+# 4. Практика
+
+Что мы будем делать - делать карту мороженного в Израиле! :)
+
+<div align="center">
+```{r, echo=FALSE, fig.align="center", out.width = '30%'}
+knitr::include_graphics("/cloud/project/icecream_meme.png")
+```
+</div>
+
+
+Я исхожу из того, что вы знаете dplyr или data.table на базовом уровне, но если у вас вызывает затруднения именно манипуляции с данными - обязательно задавайте вопросы!
+
+Мы отработаем работу с данными на трёх "классических" форматах для векторных данных: csv, geojson, shape-file.
+
+&nbsp;
+
+**A. Датасет с мороженками в csv**
+
+Загрузим нужные библиотеки:
+
+
+```{r, warning=FALSE, results='show',message=FALSE, class.source='fold-show'}
+library(sf)
+library(geojsonsf)
+library(geojsonio)
+library(readr)
+library(data.table)
+```
+
+Загрузим данные. К сожалению, в R есть известная проблема с кодировками и чтобы долго не решать проблему с крокозябрами - уберём колонки названий точек мороженного на иврите:
+
+```{r, class.source='fold-show', results = "show", error=TRUE, message=FALSE, warning=FALSE}
+isr_icecream <- fread('https://raw.githubusercontent.com/AmitLevinson/Datasets/master/golda/golda_locations.csv', encoding = 'UTF-8')
+isr_icecream[,1:2 := NULL]
+isr_icecream
+```
+
+Превратим в sf тип данных:
+
+```{r, class.source='fold-show', results = "show", error=TRUE, message=FALSE, warning=FALSE}
+isr_icecream <- st_as_sf(isr_icecream, dim = "XY", remove = T, na.fail = F, coords = c("lon", "lat"), crs = "+proj=longlat +datum=WGS84 +no_defs")
+isr_icecream
+
+plot(isr_icecream)
+```
+
+&nbsp;
+
+
+**B. Границы Израиля в Shape-file**
+
+Идём [сюда](http://www.diva-gis.org/gdata), ищем Израиль и загружаем архив. Что мы видим внутри?
+
+.shp – главноеый файл с геометриями
+
+.dbf
+
+.shx
+
+.prj
+
+(но все они важны!)
+
+По этой причине, когда вам нужно переслать shape-file отправляйте архив из всех четырёх файлов.
+
+Загрузим его и отобразим:
+
+```{r, class.source='fold-show', results = "show", error=TRUE, message=FALSE, warning=FALSE}
+isr_border <- st_read('/cloud/project/ISR_adm/ISR_adm0.shp')
+isr_border
+
+plot(st_geometry(isr_border))
+```
+
+&nbsp;
+
+
+
+**C. Точки городов Израиля в GeoJson**
+
+Json с геоданными. Достаточно тяжёлый с точки зрения размещения данных, но часто встречающийся формат.
+
+И здесь стоит отвлечься и ознакомиться с "Википедией"" от мира пространственных данных - [Open Street Map](https://www.openstreetmap.org/). 
+
+Если это "Википедия", то с неё можно выкачать данные? Да. По тэгам...
+
+&nbsp;
+...
+&nbsp;
+
+[Тэги](https://wiki.openstreetmap.org/wiki/Tag:place%3Dcity) городов.
+
+Скачаем GeoJson с городами. Загрузим его. Внутри будет огромное количество колонок, которые сейчас нам не нужны. Оставим первую и последнюю:
+
+```{r, class.source='fold-show', results = "show", error=TRUE, message=FALSE, warning=FALSE}
+isr_city <- st_read('/cloud/project/city.geojson')
+isr_city <-  isr_city[,c(1,ncol(isr_city))] 
+isr_city
+
+plot(isr_city)
+```
+
+&nbsp;
+
+Альтернативный способ через пакет osmdata (спасибо Philipp Pyshny за наводку)
+
+```{r, class.source='fold-show', results = "hide", error=TRUE, message=FALSE, warning=FALSE}
+library(osmdata)
+
+admin_osm = opq(bbox = 'Saint-Petersburg') %>%
+  add_osm_feature(key = "admin_level", value = '5') %>%
+  osmdata_sf()
+
+# Но есть проблемы с кодировкой
+iconv(admin_osm$nodes$tags, from="UTF-8", to="UTF-8") 
+iconv(admin_osm$nodes$tags, from="UTF-8", to="cp1251")
+```
+
+```{r, class.source='fold-show', results = "show", error=TRUE, message=FALSE, warning=FALSE}
+admin_osm[["osm_multipolygons"]]
+```
+
+&nbsp;
+
+**Объединяем слои и строим свою первую карту!**
+
+&nbsp;
+
+```{r, class.source='fold-show', results = "show", error=TRUE, message=FALSE, warning=FALSE}
+# Устанавливаем одинаковые проекции для всех объектов: 
+isr_border <- st_transform(isr_border, 4326)
+isr_city = st_transform(isr_city, st_crs(isr_border))
+isr_icecream = st_transform(isr_icecream, st_crs(isr_border))
+
+# Делаем карту (st_geometry() - вывести чистую геометрию, без других колонок или значений в объекте)
+{plot(isr_border %>% st_geometry())
+plot(isr_city, col = 'red', add = T)
+plot(isr_icecream, col = 'blue', add = T)}
+```
+&nbsp;
+
+Ура :)
+
+&nbsp;
+
+Теперь сохраним данные (здесь есть свои подводные камни):
+
+```{r, class.source='fold-show', results = "show", error=TRUE, message=FALSE, warning=FALSE}
+# write_sf(isr_border, "isr_border.shp", append = T, layer_options = "ENCODING=UTF-8")
+```
+
+Загрузим в качестве проверки и убедимся, что всё работает
+
+```{r, class.source='fold-show', results = "show", error=TRUE, message=FALSE, warning=FALSE}
+# double_isr_border <- st_read("isr_border.shp")
+# plot(st_geometry(double_isr_border))
+```
+
+
+&nbsp;
+
+*Бонус*
+
+Построим интерактивный график с помощью очень простой по своему синтаксису библиотеки mapview. Туториал по ней можно найти [здесь](https://bookdown.org/nicohahn/making_maps_with_r5/docs/mapview.html). mapview предназначен для карт небольшого размера.
+
+**ЗАПУСКАТЬ ОСТОРОЖНО!!!**
+
+(на Windows возможны вылеты RStudio)
+
+<div align="center">
+```{r, class.source='fold-show', fig.align="center", results = "show", error=TRUE, message=FALSE, warning=FALSE, , out.width = '70%', results = 'asis'}
+library(mapview)
+mapview(isr_border) + 
+  mapview(isr_city %>% st_geometry(), col.regions = 'red', legend = FALSE) +
+  mapview(isr_icecream %>% st_geometry(), col.regions = 'blue', legend = FALSE)
+```
+</div>
+
+&nbsp;
+
+# 5. А где брать данные?
+
+
+Open street map
+
+naturalearthdata.com/downloads/
+
+download.geofabrik.de/
+
+[#30DaysMapChallenge](https://github.com/tjukanovt/30DayMapChallenge)
+
+[Один из многочисленных обзоров челленджа](https://rud.is/books/30-day-map-challenge/)
+
+и много, много других ресурсов...
+
+&nbsp;
+
+
+# 6. Что почитать?
+
+[Pebesma E., Bivand R. Spatial Data Science. 2020](https://keen-swartz-3146c4.netlify.app/).
+
+[Lovelace R., Nowosad J., Muenchow J. Geocomputation with R. 2021](https://geocompr.robinlovelace.net/)
+
+[Dorman M. Using R for Spatial Data Analysis. 2021](https://michaeldorman.github.io/R-Spatial-Workshop-at-CBS-2021/main.html#Setup:_sample_data).
+
+Простое [гугление](https://www.google.com/search?q=r+spatial+book&oq=R+book+spat&aqs=chrome.1.69i57j0i22i30j69i64l3j69i65j69i60.4444j0j4&sourceid=chrome&ie=UTF-8) даёт как минимум 10 книг о пространственном анализе в R.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
